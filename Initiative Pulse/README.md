@@ -139,8 +139,8 @@ Credit to **keithcurtis1** for the idea to merge the token countdown into Initia
 
 Initiative Tracker Plus and ScriptCards are optional integrations, not bundled source.
 
-## Action/Effect dropdown
+## ScriptCards interactive launcher
 
-`!pulse install-scriptcards-macro` now installs a native Action/Effect dropdown under the existing `Initiative-Pulse-ScriptCards` macro name. ScriptCards is not required for this launcher. Run the command again after updating to replace an older macro. Only the chosen form prompts for its details. Inspect and Menu are also dropdown choices.
+Run `!pulse install-scriptcards-macro` after updating Pulse to replace the existing `Initiative-Pulse-ScriptCards` macro. Requires ScriptCards. Choose Action or Effect in the initial dropdown; only the chosen branch opens its interactive detail form. Repeat and Concentration accept yes or no. Effect duration uses affected-token turns.
 
-Nested Roll20 queries use HTML entities. Reopening a Collections macro for editing can decode them; reinstall the macro if that happens, or preserve it as a character Ability. The ordinary `!pulse install-macro` still installs the native chat menu.
+Select the affected token before launching Effect. This form passes the first selected token ID explicitly to Pulse because API-to-API calls do not carry normal selection. The native `!pulse-menu` still supports selecting multiple tokens. Action does not require a token.
