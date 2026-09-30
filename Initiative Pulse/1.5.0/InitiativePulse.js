@@ -252,22 +252,11 @@ var InitiativePulse = InitiativePulse || (function () {
         whisper('Setting saved. Pending saves were invalidated; request fresh checks if needed.');
     }
 
-    // The 2014 by Roll20 NPC sheet has a separate save field. A blank
-    // save means use the ability modifier; an explicit zero is still a save.
-    // A custom saveAttribute remains authoritative for other sheet layouts.
-    function concentrationSave(characterId, profile) {
-        var names = [CONCENTRATION.saveAttribute];
-        if (profile !== 'custom' && characterId && CONCENTRATION.saveAttribute === 'constitution_save_bonus' &&
-                String(getAttrByName(characterId, 'npc', 'current')) === '1') {
-            names = ['npc_con_save', 'npc_con_save_base', 'constitution_mod'];
-        }
-        for (var i = 0; i < names.length; i++) {
-            var raw = characterId ? getAttrByName(characterId, names[i], 'current') : undefined;
-            if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
-                return { attribute: names[i], value: numericHP(raw) };
-            }
-        }
-        return { attribute: names.join(' / '), value: null };
+    // PCs and NPCs use the same configured total saving throw bonus.
+    function concentrationSave(characterId) {
+        var attribute = CONCENTRATION.saveAttribute;
+        var raw = characterId ? getAttrByName(characterId, attribute, 'current') : undefined;
+        return { attribute: attribute, value: numericHP(raw) };
     }
 
     function characterOptions(characterId) {
@@ -285,7 +274,7 @@ var InitiativePulse = InitiativePulse || (function () {
             done({ error: 'Link the token to a character using Represents Character.' }); return;
         }
         if (profile !== '2024') {
-            var save = concentrationSave(characterId, profile);
+            var save = concentrationSave(characterId);
             save.profile = profile;
             save.advantage = advantage === 'yes' || (advantage !== 'no' &&
                 Number(getAttrByName(characterId, CONCENTRATION.warcasterAttribute, 'current')) === 1);
