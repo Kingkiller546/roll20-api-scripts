@@ -16,14 +16,16 @@ Initiative Tracker Plus is optional and supplies !eot if installed. Native turn
 tracker buttons work too. ScriptCards is optional for its alternative menu.
 This script neither sorts nor advances the tracker. TokenMod is not required.
 Only numeric save attributes are supported; sheet formulas are not evaluated.
+D&D 5E (2014) by Roll20 is the default. Optional 2024 sheet support uses
+getSheetItem and requires the Experimental API sandbox; no companion Mod is needed.
 
 ## INSTALL
 1. Back up the script/state or test in a copied game before upgrading.
 2. Disable older Initiative Pulse copies, Manual Concentration and TrackDuration.
      Clear TrackDuration's own effects first to restore its token names.
 3. Add the contents of 1.5.0/InitiativePulse.js as one custom Mod script and save/restart the sandbox.
-4. Run !pulse-menu. Select a token and run !pulse diagnose to check its HP and
-     save setup. Set the options below to match your character sheet and markers.
+4. Run !pulse setup (also available from !pulse-menu). Choose the game sheet
+     and HP bar. Select linked tokens and use Check selected tokens to verify.
 5. If using the optional ScriptCards macro, reinstall it from the Pulse menu.
 
 Existing Pulse state is retained. Old effects with no token are paused; select
@@ -52,7 +54,9 @@ a different token's concentration.
 
 Detected HP decreases prompt a save with DC max(10, floor(damage / 2)). Click to
 roll; saves are not automatic. GM and token/character controllers can use the
-button. The configured advantage attribute equals 1 to roll two d20s, keep high.
+button. On 2014/custom sheets the configured advantage attribute equals 1 to
+roll two d20s, keep high. Setup can explicitly turn concentration advantage on
+or off per character; 2024 characters default to no advantage until configured.
 Missing/non-numeric save modifiers block the roll with a GM warning; fix the
 attribute and retry the same button. Blank HP is unknown, not zero.
 Failure, zero HP, a configured breaking condition, or removing the concentration
@@ -68,12 +72,52 @@ no proficiency is added again. Zero and negative bonuses are valid. A populated
 but non-numeric value blocks the roll rather than silently falling back.
 PCs continue to use constitution_save_mod. Setting a different saveAttribute
 overrides this automatic NPC selection. !pulse diagnose shows the attribute
-and value actually used. This does not add support for the 2024 sheet.
+and value actually used. The custom legacy profile disables the NPC fallback.
 Attribute reference: https://wiki.roll20.net/D%26D5E_by_Roll20
+
+## SETUP MANAGER
+Run `!pulse setup`, or click Setup in the main Pulse menu. This menu does not
+require ScriptCards. All Setup changes are GM-only and survive sandbox restarts.
+
+- Game default: 2014, 2024 or custom legacy sheet. Installing this update keeps
+  existing settings and uses 2014 until the GM chooses otherwise.
+- Selected characters: choose a sheet override, or Use game default to remove
+  the override. Mixed games are supported through these explicit choices;
+  Pulse does not guess which sheet a character uses.
+- Concentration advantage: Yes, No or Default for selected characters. Set Yes
+  for War Caster. Default reads the configured legacy attribute on 2014/custom
+  sheets; it means No on 2024 sheets. This does not automatically inspect feats.
+- HP bar, concentration marker, breaking conditions and advanced save fields
+  can be changed using the menu. Character choices apply to every token linked
+  to that character; HP bar and marker choices apply to the whole game.
+- Check selected tokens shows the resolved sheet, save field, numeric bonus,
+  advantage and watched HP bar. Link each token to its character, and link the
+  watched bar to the character's HP so sheet damage updates that bar.
+
+For 2024 PCs and NPCs, Pulse reads the numeric `constitution_save_bonus`
+computed property using Roll20's asynchronous `getSheetItem` API. It uses the
+total directly, without adding proficiency again or reading legacy attributes.
+If your sheet exposes a different total, change `computedSaveAttribute`.
+Custom Beacon properties use the `user.` prefix. Other Beacon sheet systems
+are not claimed supported.
+
+2024 games must select the Experimental API sandbox and restart it. Missing,
+invalid or failed sheet reads show a warning and preserve the save button for
+retry. Reads time out after 10 seconds; late results are ignored. Duplicate
+clicks cannot roll twice. A changed spell, configuration, character link,
+controller permission, missing marker or zero HP prevents a stale result.
+Only the numeric save total and explicit advantage choice are applied; special
+feat rules, bonus dice and the sheet's full roll automation are not reproduced.
+Sheet selection changes data access, not the concentration DC rule.
+
+References: [Roll20 Beacon API guidance](https://help.roll20.net/hc/en-us/articles/30377793782423-How-to-Update-Mod-Scripts-API-for-D-D-2024-Beacon)
+and [Roll20's published 2024 save fields](https://blog.roll20.net/posts/dd-2024-automations-are-here/).
 
 ## SETTINGS (GM ONLY; SAVED BETWEEN RESTARTS)
 Run !pulse config to display the current settings. Set one option per command:
     !pulse config hpBar 1
+    !pulse config sheet 2014
+    !pulse config computedSaveAttribute constitution_save_bonus
     !pulse config saveAttribute constitution_save_mod
     !pulse config warcasterAttribute warcaster
     !pulse config marker chained-heart
@@ -90,6 +134,10 @@ request fresh saves afterward. Only trusted GMs can alter settings.
 
 ## COMMAND REFERENCE
 !pulse-menu                         Main menu
+!pulse setup                        Setup Manager (GM only)
+!pulse setup sheet 2024              Set game default (2014 / 2024 / custom)
+!pulse setup selected-sheet 2024     Override selected characters (or default)
+!pulse setup advantage yes           Selected character advantage (yes / no / default)
 !pulse inspect                      Effects, Edit, Remove, Bind and Request Save
 !pulse token-effect ...              Alias of !pulse effect
 !pulse edit E3 %% 5                  Set remaining token turns; zero removes
@@ -137,7 +185,11 @@ Local regression tests use Node.js and mocked Roll20 objects, not a live VTT:
     node tests/test-token-clock.js
     node tests/test-itp-eot.js
     node tests/test-integrated-concentration.js
-The local suite passes 71 simulated scenarios. The latest build still requires live Roll20 smoke testing; simulation results are not a claim of live character-sheet compatibility.
+The local suite passes 101 simulated scenarios, including mixed sheet choices,
+2024 reads, errors/timeouts, duplicate clicks and changes while reads are pending.
+The maintainer previously confirmed the ScriptCards forms, EOT and marker-removal
+behaviour live. The new Setup Manager and 2024 integration still require live
+Roll20 testing; simulation results are not a claim of live sheet compatibility.
 
 ## Licence and attribution
 
