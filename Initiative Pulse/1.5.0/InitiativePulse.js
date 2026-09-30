@@ -8,7 +8,9 @@
  * Integrated click-to-roll concentration checks using HP bar 1.
  * Disable the separate Manual Concentration script when installing this version.
  *
- * Token-name counter concept: TrackDuration by Keith Curtis.
+ * Original Initiative Pulse and Manual Concentration scripts: Kingkiller546.
+ * Credit to keithcurtis1 for the idea to merge the token countdown into Initiative Pulse.
+ * Licence: MIT (see repository LICENSE).
  * Actions retain Pulse's initiative timing; round notifications never tick Effects.
  * Commands:
  *   !pulse token-effect Name %% Duration %% Emoji %% Concentration (yes/no; selected tokens)
