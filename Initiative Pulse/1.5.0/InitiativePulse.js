@@ -781,9 +781,12 @@ var InitiativePulse = InitiativePulse || (function () {
     }
 
     function installScriptCardsMacro(playerid) {
-        // Retain the existing macro name/installer command for compatibility.
-        // A native dropdown avoids ScriptCards eagerly resolving both forms.
-        upsertMacro(playerid, SCRIPT_CARDS_MACRO, dropdownMacro());
+        if (!scriptCardsInstalled()) {
+            whisper('Install ScriptCards to use this interactive form, or use !pulse-menu.');
+            return;
+        }
+        var action = "!scriptcard {{\n--#title|Initiative Pulse\n--#whisper|gm\n--=Type|?{Initiative Pulse|Action,1|Effect,2}\n--?[$Type.Total] -eq 1|Action\n--^Effect|\n--:Action|\n--iCustom Action;Enter Action Details|q;ActionName;Action Name||q;Start;Starting Initiative||q;Repeat;Repeat each round? Enter yes or no\n--@pulse|action [&ActionName] %% [&Start] %% [&Repeat]\n--X|\n--:Effect|\n--iCustom Effect;Enter Effect Details|q;EffectName;Effect Name||q;Duration;Duration in affected token turns||q;Concentration;Concentration? Enter yes or no\n--@pulse|effect [&EffectName] %% [&Duration] %% 🔹 %% [&Concentration]\n--X|\n}}";
+        upsertMacro(playerid, SCRIPT_CARDS_MACRO, action);
     }
 
     function clearCombat() {
