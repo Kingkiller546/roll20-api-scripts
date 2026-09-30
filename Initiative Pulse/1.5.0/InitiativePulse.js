@@ -20,6 +20,7 @@
  *   !pulse action Name %% Initiative %% Repeat
  *   !pulse effect Name %% Duration
  *   !pulse-menu
+ *   !pulse setup (2014/2024/custom sheets, character overrides and advantage)
  *   !pulse install-macro
  *   !pulse install-scriptcards-macro
  *   !pulse install-clear-macro
@@ -45,6 +46,7 @@ var InitiativePulse = InitiativePulse || (function () {
     // Runtime baseline, shared by native events, EOT checks and fallback polling.
     // Never count an EOT command itself: ITP may reject it or be paused.
     var observedTurnOrder = null;
+    var pendingSheetReads = {};
 
     function isRoundMarker(entry) {
         return entry && String(entry.id) === '-1' && /Round\s*\d+/i.test(entry.custom || '');
@@ -196,6 +198,8 @@ var InitiativePulse = InitiativePulse || (function () {
     var CONCENTRATION = {
         marker: 'chained-heart',
         hpBar: 1,
+        sheet: '2014',
+        computedSaveAttribute: 'constitution_save_bonus',
         saveAttribute: 'constitution_save_mod',
         warcasterAttribute: 'warcaster',
         breakingConditions: [
@@ -211,7 +215,9 @@ var InitiativePulse = InitiativePulse || (function () {
         if (!payload.trim()) {
             whisper('<b>Settings</b><br>' + Object.keys(CONCENTRATION).map(function (key) {
                 return escapeHtml(key) + ': ' + escapeHtml(JSON.stringify(CONCENTRATION[key]));
-            }).join('<br>') + '<br>Set: !pulse config hpBar 1; saveAttribute NAME; warcasterAttribute NAME; marker TAG; conditions TAG=Name,TAG=Name (or none).');
+            }).join('<br>') + '<br>Set one option per command: !pulse config SETTING VALUE. ' +
+                'Settings: sheet (2014/2024/custom), hpBar (1/2/3), saveAttribute, computedSaveAttribute, ' +
+                'warcasterAttribute, marker, conditions (TAG=Name,TAG=Name or none).<br>' + button('Setup Manager', '!pulse setup'));
             return;
         }
         var match = payload.trim().match(/^(\S+)\s+([\s\S]+)$/);
@@ -220,7 +226,9 @@ var InitiativePulse = InitiativePulse || (function () {
         if (key === 'hpBar') {
             if (!/^[123]$/.test(value)) { whisper('HP bar must be 1, 2 or 3.'); return; }
             value = Number(value);
-        } else if (key === 'saveAttribute' || key === 'warcasterAttribute') {
+        } else if (key === 'sheet') {
+            if (['2014', '2024', 'custom'].indexOf(value) === -1) { whisper('Choose 2014, 2024 or custom.'); return; }
+        } else if (key === 'saveAttribute' || key === 'warcasterAttribute' || key === 'computedSaveAttribute') {
             if (!/^[\w.-]+$/.test(value)) { whisper('Use an attribute name containing letters, numbers, dots, underscores or hyphens.'); return; }
         } else if (key === 'marker') {
             if (!/^[\w-]+(?:::\d+)?$/.test(value)) { whisper('Use a built-in marker name or a custom marker tag such as Concentration::123.'); return; }
@@ -247,9 +255,9 @@ var InitiativePulse = InitiativePulse || (function () {
     // The 2014 by Roll20 NPC sheet has a separate save field. A blank
     // save means use the ability modifier; an explicit zero is still a save.
     // A custom saveAttribute remains authoritative for other sheet layouts.
-    function concentrationSave(characterId) {
+    function concentrationSave(characterId, profile) {
         var names = [CONCENTRATION.saveAttribute];
-        if (characterId && CONCENTRATION.saveAttribute === 'constitution_save_mod' &&
+        if (profile !== 'custom' && characterId && CONCENTRATION.saveAttribute === 'constitution_save_mod' &&
                 String(getAttrByName(characterId, 'npc', 'current')) === '1') {
             names = ['npc_con_save', 'npc_con_save_base', 'constitution_mod'];
         }
@@ -262,20 +270,137 @@ var InitiativePulse = InitiativePulse || (function () {
         return { attribute: names.join(' / '), value: null };
     }
 
+    function characterOptions(characterId) {
+        return (getState().characterOptions || {})[characterId] || {};
+    }
+
+    function sheetProfile(characterId) {
+        return characterOptions(characterId).sheet || CONCENTRATION.sheet;
+    }
+
+    function readConcentrationSheet(characterId, done) {
+        var profile = sheetProfile(characterId);
+        var advantage = characterOptions(characterId).advantage;
+        if (!characterId || !getObj('character', characterId)) {
+            done({ error: 'Link the token to a character using Represents Character.' }); return;
+        }
+        if (profile !== '2024') {
+            var save = concentrationSave(characterId, profile);
+            save.profile = profile;
+            save.advantage = advantage === 'yes' || (advantage !== 'no' &&
+                Number(getAttrByName(characterId, CONCENTRATION.warcasterAttribute, 'current')) === 1);
+            done(save); return;
+        }
+        if (typeof getSheetItem !== 'function') {
+            done({ error: '2024 sheet access is unavailable. Enable the Experimental API sandbox and restart it.' }); return;
+        }
+        var property = CONCENTRATION.computedSaveAttribute;
+        var finished = false;
+        function finish(result) {
+            if (finished) { return; }
+            finished = true;
+            done(result);
+        }
+        setTimeout(function () {
+            finish({ error: 'The 2024 sheet read timed out. Check the sandbox and retry this save button.' });
+        }, 10000);
+        Promise.resolve().then(function () {
+            return getSheetItem(characterId, property);
+        }).then(function (raw) {
+            finish({ attribute: property, value: typeof raw === 'number' || typeof raw === 'string' ? numericHP(raw) : null,
+                profile: profile, advantage: advantage === 'yes' });
+        }, function () {
+            finish({ error: 'Could not read ' + property + ' from the 2024 sheet. Check the Experimental sandbox and Setup, then retry.' });
+        });
+    }
+
+    function selectedCharacters(msg) {
+        var ids = [];
+        (msg.selected || []).forEach(function (selection) {
+            var token = selection._type === 'graphic' && getObj('graphic', selection._id);
+            var id = token && token.get('represents');
+            if (id && getObj('character', id) && ids.indexOf(id) === -1) { ids.push(id); }
+        });
+        return ids;
+    }
+
+    function showSetup(msg) {
+        var rows = selectedCharacters(msg).map(function (id) {
+            var character = getObj('character', id), options = characterOptions(id);
+            return escapeHtml(character.get('name') || id) + ': ' + escapeHtml(sheetProfile(id)) +
+                '; concentration advantage: ' + escapeHtml(options.advantage || 'default');
+        });
+        whisper('<b>Setup Manager</b><br>Game default: ' + escapeHtml(CONCENTRATION.sheet) +
+            '<br>' + button('2014 sheets', '!pulse setup sheet 2014') +
+            button('2024 sheets', '!pulse setup sheet 2024') + button('Custom legacy sheet', '!pulse setup sheet custom') +
+            '<br><b>Selected characters</b><br>' + (rows.join('<br>') || 'Select linked tokens to change their characters.') +
+            '<br>' + button('Use game default', '!pulse setup selected-sheet default') +
+            button('Use 2014', '!pulse setup selected-sheet 2014') + button('Use 2024', '!pulse setup selected-sheet 2024') +
+            button('Use custom', '!pulse setup selected-sheet custom') +
+            '<br>Concentration advantage (for example, War Caster): ' +
+            button('Yes', '!pulse setup advantage yes') + button('No', '!pulse setup advantage no') +
+            button('Default', '!pulse setup advantage default') +
+            '<br>Default advantage uses the legacy advantage attribute for 2014/custom; 2024 defaults to No. Set Yes for characters who have War Caster.' +
+            '<br><b>HP and markers</b><br>HP bar: ' + CONCENTRATION.hpBar + ' ' +
+            button('Bar 1', '!pulse config hpBar 1') + button('Bar 2', '!pulse config hpBar 2') + button('Bar 3', '!pulse config hpBar 3') +
+            '<br>Concentration marker: ' + escapeHtml(CONCENTRATION.marker) + ' ' +
+            button('Change marker', '!pulse config marker ?{Concentration marker tag|chained-heart}') +
+            '<br>' + button('Check selected tokens', '!pulse diagnose') +
+            button('Advanced settings', '!pulse config') + button('Main menu', '!pulse-menu') +
+            '<br><b>Advanced sheet mapping</b><br>2014/custom save: ' + escapeHtml(CONCENTRATION.saveAttribute) +
+            ' ' + button('Change legacy save', '!pulse config saveAttribute ?{Save attribute|constitution_save_mod}') +
+            '<br>2024 save: ' + escapeHtml(CONCENTRATION.computedSaveAttribute) +
+            ' ' + button('Change 2024 save', '!pulse config computedSaveAttribute ?{2024 save property|constitution_save_bonus}') +
+            '<br>Legacy advantage: ' + escapeHtml(CONCENTRATION.warcasterAttribute) +
+            ' ' + button('Change advantage attribute', '!pulse config warcasterAttribute ?{Advantage attribute|warcaster}') +
+            '<br>' + button('Breaking conditions', '!pulse config conditions ?{Marker=Condition pairs or none|interdiction=Incapacitated,pummeled=Paralysed,frozen-orb=Petrified,fist=Stunned,sleepy=Unconscious}') +
+            '<br>2024 sheets require the Experimental API sandbox. Link the HP token bar to the sheet HP field. ' +
+            'Character choices apply to all tokens representing that character and survive restarts.');
+    }
+
+    function setupManager(payload, msg) {
+        if (!payload.trim()) { showSetup(msg); return; }
+        var parts = payload.trim().split(/\s+/), key = parts[0], value = parts[1];
+        if (parts.length !== 2) { whisper('Use the Setup buttons to choose a setting.'); return; }
+        if (key === 'sheet') {
+            configure('sheet ' + value); showSetup(msg); return;
+        }
+        var allowed = key === 'selected-sheet' ? ['default', '2014', '2024', 'custom'] :
+            key === 'advantage' ? ['default', 'yes', 'no'] : [];
+        if (allowed.indexOf(value) === -1) { whisper('Invalid Setup choice.'); return; }
+        var ids = selectedCharacters(msg);
+        if (!ids.length) { whisper('Select tokens linked to characters first.'); return; }
+        var data = getState();
+        data.characterOptions = data.characterOptions || {};
+        ids.forEach(function (id) {
+            var options = data.characterOptions[id] || {};
+            var field = key === 'selected-sheet' ? 'sheet' : 'advantage';
+            if (value === 'default') { delete options[field]; } else { options[field] = value; }
+            data.characterOptions[id] = options;
+        });
+        concentrationData().checks = {};
+        whisper('Character settings saved. Request fresh concentration checks for any pending saves.');
+        showSetup(msg);
+    }
+
     function diagnose(msg) {
-        var rows = [];
+        var found = false;
         (msg.selected || []).forEach(function (selection) {
             var token = selection._type === 'graphic' && getObj('graphic', selection._id);
             if (!token) { return; }
+            found = true;
             var character = token.get('represents');
-            var save = concentrationSave(character);
-            var warcaster = character ? getAttrByName(character, CONCENTRATION.warcasterAttribute, 'current') : undefined;
-            rows.push('<b>' + escapeHtml(tokenLabel(token.id)) + '</b>: HP bar ' + CONCENTRATION.hpBar + ' = ' +
-                escapeHtml(token.get('bar' + CONCENTRATION.hpBar + '_value')) + '; save = ' + escapeHtml(save.value) + ' (attribute: ' + escapeHtml(save.attribute) + ')' +
-                '; advantage attribute = ' + escapeHtml(warcaster) +
-                (save.value === null ? ' — SAVE NOT READY' : ' — save ready'));
+            readConcentrationSheet(character, function (save) {
+                if (token.get('represents') !== character) { whisper('Token link changed; run Diagnose again.'); return; }
+                whisper('<b>' + escapeHtml(tokenLabel(token.id)) + '</b>: ' +
+                    (save.error ? escapeHtml(save.error) : 'sheet ' + escapeHtml(save.profile) +
+                    '; HP bar ' + CONCENTRATION.hpBar + ' = ' + escapeHtml(token.get('bar' + CONCENTRATION.hpBar + '_value')) +
+                    '; save = ' + escapeHtml(save.value) + ' (attribute: ' + escapeHtml(save.attribute) + ')' +
+                    '; concentration advantage = ' + (save.advantage ? 'Yes' : 'No') +
+                    (save.value === null ? ' — SAVE NOT READY' : ' — save ready')));
+            });
         });
-        whisper(rows.length ? rows.join('<br>') : 'Select one or more tokens first.');
+        if (!found) { whisper('Select one or more tokens first.'); }
     }
 
     function concentrationData() {
@@ -397,7 +522,7 @@ var InitiativePulse = InitiativePulse || (function () {
         return controllers.indexOf('all') !== -1 || controllers.indexOf(playerId) !== -1;
     }
 
-    function rollConcentration(token, checkId) {
+    function rollConcentration(token, checkId, playerId) {
         // Process intervening HP/condition/marker changes before trusting the button.
         handleConcentrationDamage(token);
         var data = concentrationData();
@@ -407,21 +532,35 @@ var InitiativePulse = InitiativePulse || (function () {
             whisper('That concentration check has expired or was already rolled. Use a current check button.'); return;
         }
         var characterId = token.get('represents');
-        var save = concentrationSave(characterId);
-        var modifier = save.value;
-        if (modifier === null) {
-            whisper('Cannot roll for ' + escapeHtml(tokenLabel(token.id)) + ': missing or non-numeric ' + escapeHtml(save.attribute) + '. Correct the character attribute, then click the same button again.'); return;
-        }
-        var warcaster = Number(getAttrByName(characterId, CONCENTRATION.warcasterAttribute, 'current')) === 1;
-        delete data.checks[checkId]; // Single use, even if chat listeners run synchronously.
-        var first = randomInteger(20), second = warcaster ? randomInteger(20) : null;
-        var die = warcaster ? Math.max(first, second) : first;
-        var total = die + modifier, success = total >= check.dc, spell = session.name;
-        if (!success) { endConcentration(token); }
-        concentrationCard(token, 'Concentration Check', '<b>' + escapeHtml(tokenLabel(token.id)) + '</b><br>' +
-            (warcaster ? 'War Caster Advantage: [' + first + ', ' + second + ']<br>' : '') +
-            die + (modifier >= 0 ? ' + ' : ' − ') + Math.abs(modifier) + ' = <b>' + total + '</b> vs DC ' + check.dc + '<br>' +
-            '<b>' + (success ? 'Success' : 'Failure') + '</b> — ' + (success ? 'maintains ' : 'loses ') + escapeHtml(spell) + '.');
+        if (pendingSheetReads[checkId]) { return; }
+        pendingSheetReads[checkId] = true;
+        readConcentrationSheet(characterId, function (save) {
+            delete pendingSheetReads[checkId];
+            // Beacon reads yield: recheck identity, permissions and session before
+            // using the result. Never let an old read affect a replacement spell.
+            var currentToken = getObj('graphic', token.id);
+            if (!currentToken || currentToken.get('represents') !== characterId) { return; }
+            handleConcentrationDamage(currentToken);
+            var currentData = concentrationData(), currentSession = currentData.sessions[token.id];
+            if (currentData.checks[checkId] !== check || !currentSession ||
+                    currentSession.id !== session.id || !hasConcentrationMarker(currentToken) ||
+                    !controlsConcentration(currentToken, playerId)) { return; }
+            if (save.error || save.value === null) {
+                whisper('Cannot roll for ' + escapeHtml(tokenLabel(token.id)) + ': ' +
+                    escapeHtml(save.error || ('missing or non-numeric ' + save.attribute +
+                    '. Correct the character attribute, then click the same button again.'))); return;
+            }
+            var modifier = save.value, warcaster = save.advantage;
+            delete currentData.checks[checkId]; // Consume before rolling or sending chat.
+            var first = randomInteger(20), second = warcaster ? randomInteger(20) : null;
+            var die = warcaster ? Math.max(first, second) : first;
+            var total = die + modifier, success = total >= check.dc, spell = currentSession.name;
+            if (!success) { endConcentration(currentToken); }
+            concentrationCard(currentToken, 'Concentration Check', '<b>' + escapeHtml(tokenLabel(token.id)) + '</b><br>' +
+                (warcaster ? 'War Caster Advantage / Concentration Advantage: [' + first + ', ' + second + ']<br>' : '') +
+                die + (modifier >= 0 ? ' + ' : ' − ') + Math.abs(modifier) + ' = <b>' + total + '</b> vs DC ' + check.dc + '<br>' +
+                '<b>' + (success ? 'Success' : 'Failure') + '</b> — ' + (success ? 'maintains ' : 'loses ') + escapeHtml(spell) + '.');
+        });
     }
 
     function handleConcentrationCommand(msg) {
@@ -439,7 +578,7 @@ var InitiativePulse = InitiativePulse || (function () {
         if (verb === 'roll') {
             var check = content.match(/--check\s+(\S+)/i);
             if (!check) { whisper('Old concentration roll buttons are no longer valid. Request a fresh check using !concentration check --token TOKEN_ID --dc NUMBER.'); return; }
-            rollConcentration(token, check[1]); return;
+            rollConcentration(token, check[1], msg.playerid); return;
         }
         if (verb === 'stop') { endConcentration(token, 'stopped manually'); return; }
         if (verb === 'check') {
@@ -767,7 +906,7 @@ var InitiativePulse = InitiativePulse || (function () {
             button('Add Effect to Selected Tokens', '!pulse effect ?{Effect name} %% ?{Affected token turns|1} %% ?{Counter|Blue,🔹|Orange,🔸|Star,⭐|Sparkles,✨|Diamond,💠} %% ?{Concentration|No,no|Yes,yes}') +
             '</div><div style="margin-top:5px;">' +
             button('Inspect', '!pulse inspect') + button('Clear Combat', '!pulse clear') +
-            button('Settings', '!pulse config') + button('Check Selected Tokens', '!pulse diagnose') +
+            button('Setup', '!pulse setup') + button('Check Selected Tokens', '!pulse diagnose') +
             '</div><div style="margin-top:5px;">' +
             button('Install Menu Macro', '!pulse install-macro') +
             button('Install Clear Macro', '!pulse install-clear-macro') +
@@ -909,6 +1048,7 @@ var InitiativePulse = InitiativePulse || (function () {
         case 'inspect': inspect(); break;
         case 'clean': clean(msg.playerid); break;
         case 'config': configure(payload); break;
+        case 'setup': if (playerIsGM(msg.playerid)) { setupManager(payload, msg); } break;
         case 'diagnose': diagnose(msg); break;
         default: showMenu();
         }
@@ -970,5 +1110,3 @@ var InitiativePulse = InitiativePulse || (function () {
 
     return { version: VERSION };
 }());
-
-
