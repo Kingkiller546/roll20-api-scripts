@@ -769,17 +769,21 @@ var InitiativePulse = InitiativePulse || (function () {
         whisper('Installed GM macro <b>' + escapeHtml(name) + '</b>.');
     }
 
-    function installScriptCardsMacro(playerid) {
-        var action;
-        if (!scriptCardsInstalled()) {
-            whisper('ScriptCards is not installed, so no ScriptCards macro was created.');
-            return;
+    function dropdownMacro() {
+        // Escape nested query delimiters so only the selected branch is expanded.
+        function nested(text) {
+            return text.replace(/\|/g, '&#124;').replace(/,/g, '&#44;').replace(/}/g, '&#125;');
         }
-        action = '!scriptcard {{ --#title|Initiative Pulse --#emotestate|hidden ' +
-            '--+Actions|[Add Action](!pulse action ?{Action name} %% ?{Initiative|20} %% ?{Repeat|No,no|Yes,yes}) ' +
-            '--+Effects|[Add to selected tokens](!pulse effect ?{Effect name} %% ?{Affected token turns|1} %% 🔹 %% ?{Concentration|No,no|Yes,yes}) ' +
-            '--+Tools|[Inspect](!pulse inspect) [Clear Combat](!pulse clear) }}';
-        upsertMacro(playerid, SCRIPT_CARDS_MACRO, action);
+        return '!pulse ?{Initiative Pulse' +
+            '|Action,action ' + nested('?{Action name} %% ?{Initiative|20} %% ?{Repeat|No,no|Yes,yes}') +
+            '|Effect,effect ' + nested('?{Effect name} %% ?{Affected token turns|1} %% ?{Counter|Blue,🔹|Orange,🔸|Star,⭐|Sparkles,✨|Diamond,💠} %% ?{Concentration|No,no|Yes,yes}') +
+            '|Inspect,inspect|Menu,menu}';
+    }
+
+    function installScriptCardsMacro(playerid) {
+        // Retain the existing macro name/installer command for compatibility.
+        // A native dropdown avoids ScriptCards eagerly resolving both forms.
+        upsertMacro(playerid, SCRIPT_CARDS_MACRO, dropdownMacro());
     }
 
     function clearCombat() {
