@@ -244,18 +244,36 @@ var InitiativePulse = InitiativePulse || (function () {
         whisper('Setting saved. Pending saves were invalidated; request fresh checks if needed.');
     }
 
+    // The 2014 by Roll20 NPC sheet has a separate save field. A blank
+    // save means use the ability modifier; an explicit zero is still a save.
+    // A custom saveAttribute remains authoritative for other sheet layouts.
+    function concentrationSave(characterId) {
+        var names = [CONCENTRATION.saveAttribute];
+        if (characterId && CONCENTRATION.saveAttribute === 'constitution_save_mod' &&
+                String(getAttrByName(characterId, 'npc', 'current')) === '1') {
+            names = ['npc_con_save', 'npc_con_save_base', 'constitution_mod'];
+        }
+        for (var i = 0; i < names.length; i++) {
+            var raw = characterId ? getAttrByName(characterId, names[i], 'current') : undefined;
+            if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+                return { attribute: names[i], value: numericHP(raw) };
+            }
+        }
+        return { attribute: names.join(' / '), value: null };
+    }
+
     function diagnose(msg) {
         var rows = [];
         (msg.selected || []).forEach(function (selection) {
             var token = selection._type === 'graphic' && getObj('graphic', selection._id);
             if (!token) { return; }
             var character = token.get('represents');
-            var save = character ? getAttrByName(character, CONCENTRATION.saveAttribute, 'current') : undefined;
+            var save = concentrationSave(character);
             var warcaster = character ? getAttrByName(character, CONCENTRATION.warcasterAttribute, 'current') : undefined;
             rows.push('<b>' + escapeHtml(tokenLabel(token.id)) + '</b>: HP bar ' + CONCENTRATION.hpBar + ' = ' +
-                escapeHtml(token.get('bar' + CONCENTRATION.hpBar + '_value')) + '; save = ' + escapeHtml(save) +
+                escapeHtml(token.get('bar' + CONCENTRATION.hpBar + '_value')) + '; save = ' + escapeHtml(save.value) + ' (attribute: ' + escapeHtml(save.attribute) + ')' +
                 '; advantage attribute = ' + escapeHtml(warcaster) +
-                (numericHP(save) === null ? ' — SAVE NOT READY' : ' — save ready'));
+                (save.value === null ? ' — SAVE NOT READY' : ' — save ready'));
         });
         whisper(rows.length ? rows.join('<br>') : 'Select one or more tokens first.');
     }
@@ -389,10 +407,10 @@ var InitiativePulse = InitiativePulse || (function () {
             whisper('That concentration check has expired or was already rolled. Use a current check button.'); return;
         }
         var characterId = token.get('represents');
-        var raw = characterId ? getAttrByName(characterId, CONCENTRATION.saveAttribute, 'current') : undefined;
-        var modifier = numericHP(raw);
+        var save = concentrationSave(characterId);
+        var modifier = save.value;
         if (modifier === null) {
-            whisper('Cannot roll for ' + escapeHtml(tokenLabel(token.id)) + ': missing or non-numeric ' + escapeHtml(CONCENTRATION.saveAttribute) + '. Correct the character attribute, then click the same button again.'); return;
+            whisper('Cannot roll for ' + escapeHtml(tokenLabel(token.id)) + ': missing or non-numeric ' + escapeHtml(save.attribute) + '. Correct the character attribute, then click the same button again.'); return;
         }
         var warcaster = Number(getAttrByName(characterId, CONCENTRATION.warcasterAttribute, 'current')) === 1;
         delete data.checks[checkId]; // Single use, even if chat listeners run synchronously.
