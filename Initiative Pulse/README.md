@@ -61,6 +61,16 @@ scripts are checked every 250 ms; HP and conditions have a 500 ms fallback.
 Save buttons are single-use and bound to their original concentration session.
 Checks for hidden tokens go to the GM. Normal checks are public.
 
+With the default saveAttribute, D&D 5E (2014) by Roll20 NPCs (npc = 1)
+use npc_con_save, then npc_con_save_base if the first field is blank, then
+constitution_mod if both save fields are blank. These save bonuses are totals;
+no proficiency is added again. Zero and negative bonuses are valid. A populated
+but non-numeric value blocks the roll rather than silently falling back.
+PCs continue to use constitution_save_mod. Setting a different saveAttribute
+overrides this automatic NPC selection. !pulse diagnose shows the attribute
+and value actually used. This does not add support for the 2024 sheet.
+Attribute reference: https://wiki.roll20.net/D%26D5E_by_Roll20
+
 ## SETTINGS (GM ONLY; SAVED BETWEEN RESTARTS)
 Run !pulse config to display the current settings. Set one option per command:
     !pulse config hpBar 1
