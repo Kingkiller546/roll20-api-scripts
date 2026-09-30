@@ -1,20 +1,20 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
 const code=fs.readFileSync(require('path').join(__dirname,'../1.5.0/InitiativePulse.js'),'utf8');let count=0;
 function test(name,fn){fn();count++;console.log('PASS '+name);}
-function setup(legacy=false){
+function setup(legacy=false,options={}){
  const state=legacy?{MANUAL_CONCENTRATION:{spells:{a:'Legacy spell'}}}:{};
  const tokens={},chars={ca:{get:k=>k==='controlledby'?'owner':''}},attrs={constitution_save_mod:'3',warcaster:'0'},chat=[],dice=[];
  for(const id of ['a','b']) tokens[id]={id,p:{_subtype:'token',name:id,bar1_value:'40',represents:'ca',controlledby:'',layer:'objects',statusmarkers:legacy&&id==='a'?'chained-heart':''},get(k){return this.p[k]},set(k,v){this.p[k]=v}};
- let handlers={},polls=[],order=[{id:'a',pr:20},{id:'b',pr:10}],rolls=0;
+ let handlers={},polls=[],timers=[],order=[{id:'a',pr:20},{id:'b',pr:10}],rolls=0;
  const emit=(e,...args)=>(handlers[e]||[]).forEach(f=>f(...args));
- function boot(){handlers={};polls=[];vm.runInNewContext(code,{state,on:(e,f)=>(handlers[e]||(handlers[e]=[])).push(f),Campaign:()=>({get:()=>JSON.stringify(order)}),getObj:(t,id)=>t==='graphic'?tokens[id]:chars[id],findObjs:q=>q._type==='graphic'?Object.values(tokens):[],getAttrByName:(id,n)=>attrs[n],playerIsGM:id=>id==='gm',sendChat:(s,m)=>chat.push(m),log:()=>{},setTimeout:()=>{},setInterval:f=>polls.push(f),randomInteger:()=>{rolls++;return dice.length?dice.shift():10}});emit('ready');}
+ function boot(){handlers={};polls=[];timers=[];vm.runInNewContext(code,{state,on:(e,f)=>(handlers[e]||(handlers[e]=[])).push(f),Campaign:()=>({get:()=>JSON.stringify(order)}),getObj:(t,id)=>t==='graphic'?tokens[id]:chars[id],findObjs:q=>q._type==='graphic'?Object.values(tokens):[],getAttrByName:(id,n)=>(options.attributesByCharacter&&options.attributesByCharacter[id]||attrs)[n],getSheetItem:options.getSheetItem,playerIsGM:id=>id==='gm',sendChat:(s,m)=>chat.push(m),log:()=>{},setTimeout:(f,ms)=>timers.push({f,ms}),setInterval:f=>polls.push(f),randomInteger:()=>{rolls++;return dice.length?dice.shift():10}});emit('ready');}
  function cmd(content,ids=['a'],playerid='gm'){emit('chat:message',{type:'api',content,playerid,selected:ids.map(_id=>({_type:'graphic',_id}))});}
  const checks=()=>Object.keys(state.InitiativePulse.concentration.checks);
  function damage(value,native=true){const prev={bar1_value:tokens.a.get('bar1_value')};tokens.a.set('bar1_value',String(value));if(native){emit('change:graphic:bar1_value',tokens.a,prev);emit('change:graphic',tokens.a,prev);}}
  const poll=()=>polls.forEach(f=>f());
  const roll=(id=checks()[0],who='owner',extra='')=>cmd('!concentration roll --token a --check '+id+extra,[],who);
  const add=(name='Haste',n=10)=>cmd('!pulse effect '+name+' %% '+n+' %% ⭐ %% yes');
- boot();return {state,tokens,attrs,chat,dice,boot,emit,cmd,checks,damage,poll,roll,add,rolls:()=>rolls};
+ boot();return {state,tokens,chars,attrs,chat,dice,boot,emit,cmd,checks,damage,poll,roll,add,rolls:()=>rolls,timeout:()=>timers.filter(t=>t.ms===10000).forEach(t=>t.f())};
 }
 test('damage prompts once across property, broad and polling updates',()=>{const h=setup();h.add();h.damage(32);h.poll();assert.equal(h.checks().length,1);assert.equal(h.state.InitiativePulse.concentration.checks[h.checks()[0]].dc,10);assert.ok(h.chat.some(m=>m.includes('Haste')&&m.includes('Click to Roll')));assert.equal(h.rolls(),0);});
 test('large damage uses half damage DC; healing needs no check',()=>{const h=setup();h.tokens.a.set('bar1_value','100');h.add();h.damage(60);assert.equal(h.state.InitiativePulse.concentration.checks[h.checks()[0]].dc,20);h.damage(80);assert.equal(h.checks().length,1);});
@@ -55,6 +55,85 @@ test('custom save attribute still overrides NPC detection',()=>{const h=setup();
 test('diagnose identifies the actual NPC attribute and value',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',constitution_mod:'2'});h.cmd('!pulse diagnose');assert.ok(h.chat.some(m=>m.includes('save = 2 (attribute: constitution_mod)')&&m.includes('save ready')));});
 test('PC ignores NPC fields when NPC flag is off',()=>{const h=setup();Object.assign(h.attrs,{npc:'0',npc_con_save:'9'});h.add();h.damage(30);h.dice.push(6);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');});
 
+const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
+function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
+async function asyncTest(name,fn){await fn();count++;console.log('PASS '+name);}
+(async()=>{
+await asyncTest('2024 reads the computed total and suppresses duplicate clicks',async()=>{
+ const calls=[],d=deferred(),h=setup(false,{getSheetItem:(id,field)=>{calls.push([id,field]);return d.promise;}});
+ h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.dice.push(3);h.roll();h.roll();await flush();assert.equal(h.rolls(),0);
+ d.resolve(7);await flush();assert.deepEqual(calls,[['ca','constitution_save_bonus']]);assert.equal(h.rolls(),1);assert.ok(h.tokens.a.get('statusmarkers'));assert.equal(h.checks().length,0);
+});
+await asyncTest('2024 zero total is valid and never falls back to legacy attributes',async()=>{
+ const h=setup(false,{getSheetItem:async()=>0});h.cmd('!pulse setup sheet 2024');h.attrs.constitution_save_mod='20';h.add();h.damage(30);h.dice.push(9);h.roll();await flush();assert.equal(h.tokens.a.get('statusmarkers'),'');
+});
+await asyncTest('2024 negative total is applied',async()=>{
+ const h=setup(false,{getSheetItem:async()=>-2});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.dice.push(11);h.roll();await flush();assert.ok(h.chat.some(m=>m.includes('11 − 2 =')));assert.equal(h.tokens.a.get('statusmarkers'),'');
+});
+await asyncTest('mixed game resolves sheet per character and stores choices across restart',async()=>{
+ const calls=[],h=setup(false,{getSheetItem:async(id,field)=>{calls.push(id);return 8;}});
+ h.chars.cb={get:k=>k==='controlledby'?'owner':'Second'};h.tokens.b.set('represents','cb');
+ h.cmd('!pulse setup selected-sheet 2024',['b']);h.boot();h.cmd('!pulse diagnose',['a','b']);await flush();
+ assert.deepEqual(calls,['cb']);assert.ok(h.chat.some(m=>m.includes('sheet 2014')&&m.includes('save = 3')));assert.ok(h.chat.some(m=>m.includes('sheet 2024')&&m.includes('save = 8')));
+ h.cmd('!pulse setup selected-sheet default',['b']);h.cmd('!pulse diagnose',['b']);await flush();assert.equal(calls.length,1);
+});
+await asyncTest('setup advantage Yes persists and works for 2024',async()=>{
+ const h=setup(false,{getSheetItem:async()=>3});h.cmd('!pulse setup sheet 2024');h.cmd('!pulse setup advantage yes');h.boot();h.add();h.damage(30);h.dice.push(1,15);h.roll();await flush();assert.equal(h.rolls(),2);assert.ok(h.tokens.a.get('statusmarkers'));
+});
+await asyncTest('setup advantage No overrides legacy War Caster',async()=>{
+ const h=setup();h.attrs.warcaster='1';h.cmd('!pulse setup advantage no');h.add();h.damage(30);h.dice.push(1,20);h.roll();assert.equal(h.rolls(),1);assert.equal(h.tokens.a.get('statusmarkers'),'');
+});
+await asyncTest('2024 default advantage never reads legacy War Caster',async()=>{
+ const h=setup(false,{getSheetItem:async()=>3});h.attrs.warcaster='1';h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();assert.equal(h.rolls(),1);
+});
+await asyncTest('missing Beacon API keeps the request and explains sandbox requirement',async()=>{
+ const h=setup();h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);assert.ok(h.chat.some(m=>m.includes('Experimental API sandbox')));
+});
+await asyncTest('rejected sheet read can be retried without consuming request',async()=>{
+ let fail=true;const h=setup(false,{getSheetItem:async()=>{if(fail)throw Error('offline');return 4;}});
+ h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);
+ fail=false;h.roll();await flush();assert.equal(h.rolls(),1);
+});
+await asyncTest('non-numeric Beacon data blocks instead of guessing a modifier',async()=>{
+ for(const value of ['',null,{},true,[],Infinity,'1d4+3',undefined]){
+  const h=setup(false,{getSheetItem:async()=>value});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);
+ }
+});
+await asyncTest('timed-out reads allow retry and ignore the late first result',async()=>{
+ const d=deferred();let calls=0;const h=setup(false,{getSheetItem:()=>++calls===1?d.promise:Promise.resolve(4)});
+ h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();h.timeout();assert.equal(h.checks().length,1);h.roll();await flush();assert.equal(h.rolls(),1);
+ d.resolve(-100);await flush();assert.equal(h.rolls(),1);assert.ok(h.tokens.a.get('statusmarkers'));
+});
+await asyncTest('spell replacement during a sheet read prevents stale roll',async()=>{
+ const d=deferred(),h=setup(false,{getSheetItem:()=>d.promise});h.cmd('!pulse setup sheet 2024');h.add('Old');h.damage(30);h.roll();await flush();h.add('New');d.resolve(-100);await flush();assert.equal(h.rolls(),0);assert.equal(h.state.InitiativePulse.effects[0].name,'New');
+});
+await asyncTest('marker loss during a sheet read prevents stale roll',async()=>{
+ const d=deferred(),h=setup(false,{getSheetItem:()=>d.promise});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();h.tokens.a.set('statusmarkers','');d.resolve(10);await flush();assert.equal(h.rolls(),0);assert.equal(h.state.InitiativePulse.effects.length,0);
+});
+await asyncTest('zero HP during a sheet read prevents stale roll',async()=>{
+ const d=deferred(),h=setup(false,{getSheetItem:()=>d.promise});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();h.tokens.a.set('bar1_value','0');d.resolve(10);await flush();assert.equal(h.rolls(),0);
+});
+await asyncTest('settings changes during a sheet read invalidate the old request',async()=>{
+ const d=deferred(),h=setup(false,{getSheetItem:()=>d.promise});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();h.cmd('!pulse setup advantage yes');d.resolve(10);await flush();assert.equal(h.rolls(),0);assert.equal(h.checks().length,0);
+});
+await asyncTest('changed token character during a sheet read prevents stale roll',async()=>{
+ const d=deferred(),h=setup(false,{getSheetItem:()=>d.promise});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();h.tokens.a.set('represents','other');d.resolve(10);await flush();assert.equal(h.rolls(),0);
+});
+await asyncTest('controller permission is rechecked after a sheet read',async()=>{
+ const d=deferred(),h=setup(false,{getSheetItem:()=>d.promise});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.roll();await flush();h.chars.ca={get:()=>''};d.resolve(10);await flush();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);
+});
+await asyncTest('setup is GM-only and rejects invalid choices',async()=>{
+ const h=setup();h.cmd('!pulse setup sheet 2024',[],'owner');h.cmd('!pulse setup advantage yes',['a'],'owner');h.cmd('!pulse setup sheet typo');h.cmd('!pulse setup advantage typo');assert.equal(h.state.InitiativePulse.config,undefined);assert.equal(h.state.InitiativePulse.characterOptions,undefined);
+});
+await asyncTest('unlinked tokens cannot be configured or rolled',async()=>{
+ const h=setup();h.tokens.a.set('represents','');h.cmd('!pulse setup advantage yes');assert.equal(h.state.InitiativePulse.characterOptions,undefined);h.add();h.damage(30);h.roll(undefined,'gm');assert.equal(h.rolls(),0);assert.ok(h.chat.some(m=>m.includes('Represents Character')));
+});
+await asyncTest('custom legacy profile does not apply the NPC fallback',async()=>{
+ const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'20'});h.cmd('!pulse setup sheet custom');h.add();h.damage(30);h.dice.push(6);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');
+});
+await asyncTest('computed property override is read from 2024 sheets',async()=>{
+ const calls=[],h=setup(false,{getSheetItem:async(id,key)=>{calls.push(key);return 5;}});
+ h.cmd('!pulse config computedSaveAttribute user.concentration_total');h.cmd('!pulse setup sheet 2024');h.cmd('!pulse diagnose');await flush();assert.deepEqual(calls,['user.concentration_total']);
+});
 console.log(count+' concentration engine scenarios passed.');
-
-
+})().catch(error=>{console.error(error);process.exitCode=1;});
