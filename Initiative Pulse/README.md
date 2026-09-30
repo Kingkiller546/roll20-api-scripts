@@ -70,10 +70,16 @@ use npc_con_save, then npc_con_save_base if the first field is blank, then
 constitution_mod if both save fields are blank. These save bonuses are totals;
 no proficiency is added again. Zero and negative bonuses are valid. A populated
 but non-numeric value blocks the roll rather than silently falling back.
-PCs continue to use constitution_save_mod. Setting a different saveAttribute
+PCs use constitution_save_bonus. Setting a different saveAttribute
 overrides this automatic NPC selection. !pulse diagnose shows the attribute
 and value actually used. The custom legacy profile disables the NPC fallback.
 Attribute reference: https://wiki.roll20.net/D%26D5E_by_Roll20
+
+This update corrects the earlier pre-release default constitution_save_mod to
+constitution_save_bonus. Saved defaults are migrated once on restart, including
+settings saved before the Setup Manager existed. Custom attribute names and an
+explicit custom legacy profile are preserved. Migration invalidates outstanding
+save buttons; request fresh checks when needed.
 
 ## SETUP MANAGER
 Run `!pulse setup`, or click Setup in the main Pulse menu. This menu does not
@@ -118,7 +124,7 @@ Run !pulse config to display the current settings. Set one option per command:
     !pulse config hpBar 1
     !pulse config sheet 2014
     !pulse config computedSaveAttribute constitution_save_bonus
-    !pulse config saveAttribute constitution_save_mod
+    !pulse config saveAttribute constitution_save_bonus
     !pulse config warcasterAttribute warcaster
     !pulse config marker chained-heart
     !pulse config conditions interdiction=Incapacitated,pummeled=Paralysed,frozen-orb=Petrified,fist=Stunned,sleepy=Unconscious
@@ -185,7 +191,7 @@ Local regression tests use Node.js and mocked Roll20 objects, not a live VTT:
     node tests/test-token-clock.js
     node tests/test-itp-eot.js
     node tests/test-integrated-concentration.js
-The local suite passes 101 simulated scenarios, including mixed sheet choices,
+The local suite passes 105 simulated scenarios, including mixed sheet choices,
 2024 reads, errors/timeouts, duplicate clicks and changes while reads are pending.
 The maintainer previously confirmed the ScriptCards forms, EOT and marker-removal
 behaviour live. The new Setup Manager and 2024 integration still require live
