@@ -138,3 +138,9 @@ Released under the repository’s [MIT licence](../LICENSE).
 Credit to **keithcurtis1** for the idea to merge the token countdown into Initiative Pulse. This acknowledges the merge idea, not authorship of Initiative Pulse or the concentration script.
 
 Initiative Tracker Plus and ScriptCards are optional integrations, not bundled source.
+
+## Action/Effect dropdown
+
+`!pulse install-scriptcards-macro` now installs a native Action/Effect dropdown under the existing `Initiative-Pulse-ScriptCards` macro name. ScriptCards is not required for this launcher. Run the command again after updating to replace an older macro. Only the chosen form prompts for its details. Inspect and Menu are also dropdown choices.
+
+Nested Roll20 queries use HTML entities. Reopening a Collections macro for editing can decode them; reinstall the macro if that happens, or preserve it as a character Ability. The ordinary `!pulse install-macro` still installs the native chat menu.
