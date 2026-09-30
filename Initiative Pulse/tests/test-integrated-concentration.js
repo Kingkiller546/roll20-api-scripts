@@ -3,7 +3,7 @@ const code=fs.readFileSync(require('path').join(__dirname,'../1.5.0/InitiativePu
 function test(name,fn){fn();count++;console.log('PASS '+name);}
 function setup(legacy=false,options={}){
  const state=legacy?{MANUAL_CONCENTRATION:{spells:{a:'Legacy spell'}}}:{};
- const tokens={},chars={ca:{get:k=>k==='controlledby'?'owner':''}},attrs={constitution_save_mod:'3',warcaster:'0'},chat=[],dice=[];
+ const tokens={},chars={ca:{get:k=>k==='controlledby'?'owner':''}},attrs={constitution_save_bonus:'3',warcaster:'0'},chat=[],dice=[];
  for(const id of ['a','b']) tokens[id]={id,p:{_subtype:'token',name:id,bar1_value:'40',represents:'ca',controlledby:'',layer:'objects',statusmarkers:legacy&&id==='a'?'chained-heart':''},get(k){return this.p[k]},set(k,v){this.p[k]=v}};
  let handlers={},polls=[],timers=[],order=[{id:'a',pr:20},{id:'b',pr:10}],rolls=0;
  const emit=(e,...args)=>(handlers[e]||[]).forEach(f=>f(...args));
@@ -25,7 +25,7 @@ test('War Caster takes higher die',()=>{const h=setup();h.attrs.warcaster='1';h.
 test('old button cannot affect recast of same named effect',()=>{const h=setup();h.add();h.damage(30);const id=h.checks()[0];h.add();h.roll(id);assert.equal(h.rolls(),0);assert.equal(h.state.InitiativePulse.effects[0].remaining,10);});
 test('unauthorised player cannot consume a check or stop concentration',()=>{const h=setup();h.add();h.damage(30);h.roll(h.checks()[0],'stranger');h.cmd('!concentration stop --token a',[],'stranger');assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);assert.ok(h.tokens.a.get('statusmarkers'));});
 test('stored DC cannot be overridden in button command',()=>{const h=setup();h.tokens.a.set('bar1_value',100);h.add();h.damage(60);h.dice.push(10);h.roll(h.checks()[0],'owner',' --dc 1');assert.equal(h.tokens.a.get('statusmarkers'),'');});
-test('missing save attribute blocks rolling without consuming request',()=>{const h=setup();delete h.attrs.constitution_save_mod;h.add();h.damage(30);h.roll();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);h.attrs.constitution_save_mod='4';h.roll();assert.equal(h.rolls(),1);});
+test('missing save attribute blocks rolling without consuming request',()=>{const h=setup();delete h.attrs.constitution_save_bonus;h.add();h.damage(30);h.roll();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);h.attrs.constitution_save_bonus='4';h.roll();assert.equal(h.rolls(),1);});
 test('zero HP immediately breaks concentration',()=>{const h=setup();h.add();h.damage(0);assert.equal(h.state.InitiativePulse.effects.length,0);assert.equal(h.tokens.a.get('name'),'a');assert.equal(h.checks().length,0);});
 test('all configured breaking markers end concentration',()=>{for(const marker of ['interdiction','pummeled','frozen-orb','fist','sleepy']){const h=setup();h.add();h.tokens.a.set('statusmarkers','chained-heart,'+marker);h.poll();assert.equal(h.state.InitiativePulse.effects.length,0);assert.equal(h.tokens.a.get('statusmarkers'),marker);}});
 test('blank HP is not interpreted as zero',()=>{const h=setup();h.tokens.a.set('bar1_value','');h.add();h.poll();assert.equal(h.state.InitiativePulse.effects.length,1);assert.equal(h.checks().length,0);});
@@ -43,7 +43,7 @@ test('custom concentration marker and custom condition mapping work',()=>{const 
 test('players cannot alter settings and invalid settings are rejected',()=>{const h=setup();h.cmd('!pulse config hpBar 2',[],'owner');assert.equal(h.state.InitiativePulse.config,undefined);h.cmd('!pulse config hpBar 4');assert.equal(h.state.InitiativePulse.config,undefined);});
 test('marker cannot be changed mid-concentration',()=>{const h=setup();h.add();h.cmd('!pulse config marker skull');assert.equal(h.tokens.a.get('statusmarkers'),'chained-heart');assert.equal(h.state.InitiativePulse.config,undefined);});
 test('condition monitoring can be explicitly disabled',()=>{const h=setup();h.cmd('!pulse config conditions none');h.add();h.tokens.a.set('statusmarkers','chained-heart,sleepy');h.poll();assert.equal(h.state.InitiativePulse.effects.length,1);});
-test('settings changes invalidate pending saves',()=>{const h=setup();h.add();h.damage(30);const id=h.checks()[0];h.cmd('!pulse config saveAttribute constitution_save_mod');h.roll(id);assert.equal(h.rolls(),0);});
+test('settings changes invalidate pending saves',()=>{const h=setup();h.add();h.damage(30);const id=h.checks()[0];h.cmd('!pulse config saveAttribute constitution_save_bonus');h.roll(id);assert.equal(h.rolls(),0);});
 
 test('NPC save takes precedence over a stale PC save',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'+7',constitution_mod:'2'});h.add();h.damage(30);h.dice.push(3);h.roll();assert.ok(h.tokens.a.get('statusmarkers'));assert.ok(h.chat.some(m=>m.includes('3 + 7 =')));});
 test('NPC explicit zero save is not replaced by its ability modifier',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'0',constitution_mod:'5'});h.add();h.damage(30);h.dice.push(9);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');});
@@ -55,6 +55,10 @@ test('custom save attribute still overrides NPC detection',()=>{const h=setup();
 test('diagnose identifies the actual NPC attribute and value',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',constitution_mod:'2'});h.cmd('!pulse diagnose');assert.ok(h.chat.some(m=>m.includes('save = 2 (attribute: constitution_mod)')&&m.includes('save ready')));});
 test('PC ignores NPC fields when NPC flag is off',()=>{const h=setup();Object.assign(h.attrs,{npc:'0',npc_con_save:'9'});h.add();h.damage(30);h.dice.push(6);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');});
 
+test('PC uses the save bonus even if the old mod attribute also exists',()=>{const h=setup();h.attrs.constitution_save_mod='0';h.attrs.constitution_save_bonus='7';h.add();h.damage(30);h.dice.push(3);h.roll();assert.ok(h.tokens.a.get('statusmarkers'));assert.ok(h.chat.some(m=>m.includes('3 + 7 =')));});
+test('upgrade corrects the saved old default and invalidates pending saves',()=>{const h=setup();h.add();h.damage(30);h.state.InitiativePulse.config={saveAttribute:'constitution_save_mod',hpBar:1};delete h.state.InitiativePulse.playerSaveDefaultCorrected;h.boot();assert.equal(h.state.InitiativePulse.config.saveAttribute,'constitution_save_bonus');assert.equal(h.checks().length,0);h.cmd('!pulse diagnose');assert.ok(h.chat.some(m=>m.includes('attribute: constitution_save_bonus')));});
+test('upgrade preserves other custom save attribute names',()=>{const h=setup();h.state.InitiativePulse.config={saveAttribute:'custom_save',sheet:'2014'};delete h.state.InitiativePulse.playerSaveDefaultCorrected;h.boot();assert.equal(h.state.InitiativePulse.config.saveAttribute,'custom_save');});
+test('upgrade preserves an explicit custom legacy profile using the old name',()=>{const h=setup();h.state.InitiativePulse.config={saveAttribute:'constitution_save_mod',sheet:'custom'};delete h.state.InitiativePulse.playerSaveDefaultCorrected;h.boot();assert.equal(h.state.InitiativePulse.config.saveAttribute,'constitution_save_mod');});
 const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 async function asyncTest(name,fn){await fn();count++;console.log('PASS '+name);}
@@ -65,7 +69,7 @@ await asyncTest('2024 reads the computed total and suppresses duplicate clicks',
  d.resolve(7);await flush();assert.deepEqual(calls,[['ca','constitution_save_bonus']]);assert.equal(h.rolls(),1);assert.ok(h.tokens.a.get('statusmarkers'));assert.equal(h.checks().length,0);
 });
 await asyncTest('2024 zero total is valid and never falls back to legacy attributes',async()=>{
- const h=setup(false,{getSheetItem:async()=>0});h.cmd('!pulse setup sheet 2024');h.attrs.constitution_save_mod='20';h.add();h.damage(30);h.dice.push(9);h.roll();await flush();assert.equal(h.tokens.a.get('statusmarkers'),'');
+ const h=setup(false,{getSheetItem:async()=>0});h.cmd('!pulse setup sheet 2024');h.attrs.constitution_save_bonus='20';h.add();h.damage(30);h.dice.push(9);h.roll();await flush();assert.equal(h.tokens.a.get('statusmarkers'),'');
 });
 await asyncTest('2024 negative total is applied',async()=>{
  const h=setup(false,{getSheetItem:async()=>-2});h.cmd('!pulse setup sheet 2024');h.add();h.damage(30);h.dice.push(11);h.roll();await flush();assert.ok(h.chat.some(m=>m.includes('11 − 2 =')));assert.equal(h.tokens.a.get('statusmarkers'),'');
