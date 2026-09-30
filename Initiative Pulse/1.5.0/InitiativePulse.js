@@ -200,7 +200,7 @@ var InitiativePulse = InitiativePulse || (function () {
         hpBar: 1,
         sheet: '2014',
         computedSaveAttribute: 'constitution_save_bonus',
-        saveAttribute: 'constitution_save_mod',
+        saveAttribute: 'constitution_save_bonus',
         warcasterAttribute: 'warcaster',
         breakingConditions: [
             { marker: 'interdiction', name: 'Incapacitated' },
@@ -257,7 +257,7 @@ var InitiativePulse = InitiativePulse || (function () {
     // A custom saveAttribute remains authoritative for other sheet layouts.
     function concentrationSave(characterId, profile) {
         var names = [CONCENTRATION.saveAttribute];
-        if (profile !== 'custom' && characterId && CONCENTRATION.saveAttribute === 'constitution_save_mod' &&
+        if (profile !== 'custom' && characterId && CONCENTRATION.saveAttribute === 'constitution_save_bonus' &&
                 String(getAttrByName(characterId, 'npc', 'current')) === '1') {
             names = ['npc_con_save', 'npc_con_save_base', 'constitution_mod'];
         }
@@ -348,7 +348,7 @@ var InitiativePulse = InitiativePulse || (function () {
             '<br>' + button('Check selected tokens', '!pulse diagnose') +
             button('Advanced settings', '!pulse config') + button('Main menu', '!pulse-menu') +
             '<br><b>Advanced sheet mapping</b><br>2014/custom save: ' + escapeHtml(CONCENTRATION.saveAttribute) +
-            ' ' + button('Change legacy save', '!pulse config saveAttribute ?{Save attribute|constitution_save_mod}') +
+            ' ' + button('Change legacy save', '!pulse config saveAttribute ?{Save attribute|constitution_save_bonus}') +
             '<br>2024 save: ' + escapeHtml(CONCENTRATION.computedSaveAttribute) +
             ' ' + button('Change 2024 save', '!pulse config computedSaveAttribute ?{2024 save property|constitution_save_bonus}') +
             '<br>Legacy advantage: ' + escapeHtml(CONCENTRATION.warcasterAttribute) +
@@ -1056,6 +1056,15 @@ var InitiativePulse = InitiativePulse || (function () {
 
     function checkInstall() {
         var data = getState();
+        // One-time correction of the pre-release 2014 default; preserve custom mappings.
+        if (!data.playerSaveDefaultCorrected) {
+            if (data.config && data.config.sheet !== 'custom' &&
+                    data.config.saveAttribute === 'constitution_save_mod') {
+                data.config.saveAttribute = 'constitution_save_bonus';
+                if (data.concentration) { data.concentration.checks = {}; }
+            }
+            data.playerSaveDefaultCorrected = true;
+        }
         if (data.config) { Object.keys(CONCENTRATION).forEach(function (key) { if (data.config[key] !== undefined) { CONCENTRATION[key] = data.config[key]; } }); }
         data.activeInitiative = currentInitiative(Campaign());
         observedTurnOrder = Campaign().get('turnorder') || '';
