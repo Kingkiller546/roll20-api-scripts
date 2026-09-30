@@ -131,5 +131,10 @@ The local suite passes 71 simulated scenarios. The latest build still requires l
 
 ## Licence and attribution
 
-As with version 1.0.0, this contribution is provided under the repository's [MIT licence](../LICENSE). The token-name counter concept was inspired by TrackDuration by [Keith Curtis](https://app.roll20.net/users/162065/keithcurtis). The concentration checks integrate the maintainer-supplied Manual Concentration script. Initiative Tracker Plus and ScriptCards are optional integrations, not bundled source.
+Released under the repository’s [MIT licence](../LICENSE).
 
+**Kingkiller546** authored both the original Initiative Pulse and Manual Concentration scripts and maintains this combined script.
+
+Credit to **keithcurtis1** for the idea to merge the token countdown into Initiative Pulse. This acknowledges the merge idea, not authorship of Initiative Pulse or the concentration script.
+
+Initiative Tracker Plus and ScriptCards are optional integrations, not bundled source.
