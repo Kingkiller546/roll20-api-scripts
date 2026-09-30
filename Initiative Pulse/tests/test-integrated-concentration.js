@@ -44,6 +44,17 @@ test('players cannot alter settings and invalid settings are rejected',()=>{cons
 test('marker cannot be changed mid-concentration',()=>{const h=setup();h.add();h.cmd('!pulse config marker skull');assert.equal(h.tokens.a.get('statusmarkers'),'chained-heart');assert.equal(h.state.InitiativePulse.config,undefined);});
 test('condition monitoring can be explicitly disabled',()=>{const h=setup();h.cmd('!pulse config conditions none');h.add();h.tokens.a.set('statusmarkers','chained-heart,sleepy');h.poll();assert.equal(h.state.InitiativePulse.effects.length,1);});
 test('settings changes invalidate pending saves',()=>{const h=setup();h.add();h.damage(30);const id=h.checks()[0];h.cmd('!pulse config saveAttribute constitution_save_mod');h.roll(id);assert.equal(h.rolls(),0);});
+
+test('NPC save takes precedence over a stale PC save',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'+7',constitution_mod:'2'});h.add();h.damage(30);h.dice.push(3);h.roll();assert.ok(h.tokens.a.get('statusmarkers'));assert.ok(h.chat.some(m=>m.includes('3 + 7 =')));});
+test('NPC explicit zero save is not replaced by its ability modifier',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'0',constitution_mod:'5'});h.add();h.damage(30);h.dice.push(9);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');});
+test('NPC blank save uses Constitution modifier, including negatives',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'',npc_con_save_base:'',constitution_mod:'-2'});h.add();h.damage(30);h.dice.push(11);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');assert.ok(h.chat.some(m=>m.includes('11 − 2 =')));});
+test('NPC save base supports sheets without a populated derived save',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save_base:'6',constitution_mod:'2'});h.add();h.damage(30);h.dice.push(4);h.roll();assert.ok(h.tokens.a.get('statusmarkers'));});
+test('NPC missing values never use the PC save or consume the check',()=>{const h=setup();h.attrs.npc='1';h.add();h.damage(30);h.roll();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);});
+test('NPC invalid save blocks instead of falling back silently',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'@{constitution_mod}',constitution_mod:'5'});h.add();h.damage(30);h.roll();assert.equal(h.rolls(),0);assert.equal(h.checks().length,1);});
+test('custom save attribute still overrides NPC detection',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',npc_con_save:'0',custom_save:'8'});h.cmd('!pulse config saveAttribute custom_save');h.add();h.damage(30);h.dice.push(2);h.roll();assert.ok(h.tokens.a.get('statusmarkers'));});
+test('diagnose identifies the actual NPC attribute and value',()=>{const h=setup();Object.assign(h.attrs,{npc:'1',constitution_mod:'2'});h.cmd('!pulse diagnose');assert.ok(h.chat.some(m=>m.includes('save = 2 (attribute: constitution_mod)')&&m.includes('save ready')));});
+test('PC ignores NPC fields when NPC flag is off',()=>{const h=setup();Object.assign(h.attrs,{npc:'0',npc_con_save:'9'});h.add();h.damage(30);h.dice.push(6);h.roll();assert.equal(h.tokens.a.get('statusmarkers'),'');});
+
 console.log(count+' concentration engine scenarios passed.');
 
 
